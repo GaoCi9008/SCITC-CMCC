@@ -248,7 +248,6 @@ Windows：
 ## 致谢
 
 再次感谢 [xiaoxiaoguai-yyds](https://github.com/xiaoxiaoguai-yyds) 学长，以及所有参与测试的同学们。
-后续可能会研究面对学校校园网多设备登录限制的方法与软路由系统的登录脚本，敬请期待。
 
 ---
 
