@@ -2,18 +2,19 @@
 
 基于 [xiaoxiaoguai-yyds](https://github.com/xiaoxiaoguai-yyds) 学长的《[SCITC-xiaoyuanwifi](https://github.com/xiaoxiaoguai-yyds/SCITC-xiaoyuanwifi)》中国电信校园网登录脚本项目为灵感编写。
 
-一个用于自动登录校园网 Web Portal 认证的 Python 脚本。  
-基于实际wireshark抓包分析编写，适用于四川信息职业技术学院（SCITC）的 **中国移动** 校园网认证系统。
+一个用于自动登录校园网 Web Portal 认证的 Python 脚本。  
+基于实际 Wireshark 抓包分析编写，适用于四川信息职业技术学院（SCITC）的 **中国移动** 校园网认证系统。
 
 ---
 
 ## 功能简介
 
-- 支持有线 / 无线双网卡，自动判断当前使用的网卡并选择对应 MAC。
+- 使用固定 MAC 地址（手动填写，支持大小写和多种分隔符）。
 - 启动时判断是否在校园网，不在则直接退出，不占用资源。
 - 在校园网环境下常驻后台，定期检查网络状态。
 - 断网或认证过期后自动重新登录。
 - 运行中检测到离开校园网时自动退出，等待下次开机重新运行。
+- 每次运行脚本自动删除上次运行的日志。
 - 可配置开机自启，静默运行。
 
 ---
@@ -80,65 +81,22 @@ pip install requests
 
 打开 `校园网.py`，找到 `CONFIG` 配置区，按需修改以下项目。
 
-- **auth_host**  
-  认证服务器 IP  
-  示例：`10.2.1.27`
-
-- **auth_path**  
-  登录接口路径  
-  示例：`/api/portal/webauth`
-
-- **user_id**  
-  校园网账号  
-  示例：`你的账号`
-
-- **passwd**  
-  校园网密码  
-  示例：`你的密码`
-
-- **wlanacname**  
-  认证服务器名称  
-  示例：`SCITC-BRAS-ME60`
-
-- **mac_ethernet**  
-  有线网卡 MAC 地址  
-  示例：`aa:bb:cc:dd:ee:01`
-
-- **mac_wireless**  
-  无线网卡 MAC 地址  
-  示例：`aa:bb:cc:dd:ee:02`
-
-- **campus_ssid**  
-  校园网 WiFi 名称，留空则不校验  
-  示例：可留空
-
-- **timeout**  
-  请求超时时间（秒）  
-  示例：`8`
-
-- **retry_times**  
-  登录失败重试次数  
-  示例：`3`
-
-- **retry_interval**  
-  每次重试间隔（秒）  
-  示例：`5`
-
-- **check_interval**  
-  循环检查网络间隔（秒）  
-  示例：`900`
-
-- **internet_check_host**  
-  外网检测地址  
-  示例：`www.baidu.com`
-
-- **internet_check_port**  
-  外网检测端口  
-  示例：`80`
-
-- **log_file**  
-  日志文件名  
-  示例：`campus_login.log`
+| 配置项 | 说明 | 示例 |
+|--------|------|------|
+| `auth_host` | 认证服务器 IP | `10.2.1.27` |
+| `auth_path` | 登录接口路径 | `/api/portal/webauth` |
+| `user_id` | 校园网账号 | `你的账号` |
+| `passwd` | 校园网密码 | `你的密码` |
+| `wlanacname` | 认证服务器名称 | `SCITC-BRAS-ME60` |
+| `mac` | 本机 MAC 地址，支持大小写和 `:` / `-` 分隔，脚本会自动标准化 | `b0:25:aa:7e:b4:ae` |
+| `campus_ssid` | 校园网 WiFi 名称，留空则不校验 | 可留空 |
+| `timeout` | 请求超时时间（秒） | `8` |
+| `retry_times` | 登录失败重试次数 | `3` |
+| `retry_interval` | 每次重试间隔（秒） | `5` |
+| `check_interval` | 循环检查网络间隔（秒） | `60` |
+| `internet_check_host` | 外网检测地址 | `www.baidu.com` |
+| `internet_check_port` | 外网检测端口 | `80` |
+| `log_file` | 日志文件名 | `campus_login.log` |
 
 ### 如何查看本机 MAC 地址
 
@@ -146,27 +104,21 @@ Windows：
 
 1. 按 `Win + R`，输入 `cmd`，回车。
 2. 运行 `ipconfig /all` 或 `getmac /v`。
-3. 找到你连接校园网的那张网卡（有线和无线），复制其物理地址。
+3. 找到你连接校园网的那张网卡，复制其物理地址。
+4. 格式示例：`b0:25:aa:7e:b4:ae`
+
+> 注意：如果更换网卡或电脑，需要同步修改配置中的 MAC。
+
+### 如何查看本机 MAC 地址
+
+Windows：
+
+1. 按 `Win + R`，输入 `cmd`，回车。
+2. 运行 `ipconfig /all` 或 `getmac /v`。
+3. 找到你连接校园网的那张网卡（有线或无线），复制其物理地址。
 4. 格式示例：`aa:bb:cc:dd:ee:01`
 
 
-## 双网卡 MAC 选择逻辑
-
-脚本会自动判断当前哪张网卡在工作，并选择对应的 MAC。
-
-- **第一步：获取本机默认出口 IP**  
-  通过 `socket.connect(("8.8.8.8", 80))` 获取当前用于外网通信的 IP。
-
-- **第二步：找到拥有该 IP 的网卡**  
-  遍历所有网卡，找到 IP 匹配的那一张。
-
-- **第三步：判断网卡类型**  
-  通过网卡名称关键字或 `psutil` / PowerShell 判断是有线还是无线。
-
-- **第四步：选择 MAC**
-  - 实际 MAC 与配置匹配 → 使用配置的 MAC。
-  - 不匹配 → 按网卡类型回退到有线或无线 MAC。
-  - 无法判断 → 默认使用有线 MAC。
 
 
 ## 运行逻辑
@@ -232,10 +184,13 @@ Windows：
 5. **Referer 中的 nasip 和 userlocation**  
    这两个值来自抓包，目前写死。如果换楼或换 AP 后无法登录，请重新抓包更新。
 
-6. **平台限制**  
-   脚本依赖 Windows 的 `netsh` 和 PowerShell 获取网卡信息，目前仅支持 Windows。  
-   如果在 Linux / macOS 上运行，需要修改 `get_active_interface()` 和 `get_wifi_ssid()`。
----
+6. **每次运行自动删除日志**  
+   脚本启动时会删除上次的 `campus_login.log`，重新开始记录。  
+   如果希望保留历史日志，可以注释掉 `main()` 中删除日志的代码。
+
+7. **平台限制**  
+   脚本依赖 Windows 的 `netsh` 获取 WiFi 名称，目前仅支持 Windows。  
+   如果在 Linux / macOS 上运行，需要修改 `get_wifi_ssid()`。
 
 ## 免责声明
 
@@ -251,4 +206,4 @@ Windows：
 
 ---
 
-_Last updated: 2026-10-05_
+_Last updated: 2026-10-09_
