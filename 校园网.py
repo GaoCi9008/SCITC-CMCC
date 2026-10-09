@@ -1,5 +1,6 @@
 import os
 import json
+import re
 import socket
 import subprocess
 import hashlib
@@ -17,17 +18,15 @@ CONFIG = {
     "auth_path": "/api/portal/webauth",
 
     # 校园网账号密码
-    "user_id": "18383912694",
-    "passwd": "912694",
+    "user_id": "账号",
+    "passwd": "密码",
 
     # 认证参数
     "wlanacname": "SCITC-BRAS-ME60",
 
-    # 有线网卡 MAC
-    "mac_ethernet": "b0:25:aa:7e:b4:ae",
-
-    # 无线网卡 MAC
-    "mac_wireless": "a8:e2:91:13:c8:e4",
+    # 本机 MAC 地址（支持大小写，支持 : 或 - 分隔）
+    # 示例：b0:25:aa:7e:b4:ae 或 B0-25-AA-7E-B4-AE 或 b0-25:aa:7e:b4:ae
+    "mac": "你的MAC",
 
     # 校园网 WiFi 名称（可选，留空则不校验）
     "campus_ssid": "",
@@ -40,7 +39,7 @@ CONFIG = {
     "retry_interval": 5,
 
     # 循环检查间隔（秒）
-    "check_interval": 900,
+    "check_interval": 60,
 
     # 外网检测地址
     "internet_check_host": "www.baidu.com",
@@ -58,15 +57,27 @@ LOG_PATH = os.path.join(SCRIPT_DIR, CONFIG["log_file"])
 CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 
 
-def log_error(msg):
-    """只记录错误"""
-    line = f"[{datetime.now():%Y-%m-%d %H:%M:%S}] [ERROR] {msg}"
+def log(msg):
+    """写入日志并打印"""
+    line = f"[{datetime.now():%Y-%m-%d %H:%M:%S}] {msg}"
     print(line)
     try:
         with open(LOG_PATH, "a", encoding="utf-8") as f:
             f.write(line + "\n")
     except Exception as e:
         print(f"写入日志失败: {e}")
+
+
+def normalize_mac(mac):
+    """
+    将 MAC 地址标准化为小写冒号分隔格式。
+    支持输入：aa:bb:cc:dd:ee:ff、AA-BB-CC-DD-EE-FF、aabbccddeeff 等。
+    返回标准化后的字符串，若格式无效则返回 None。
+    """
+    cleaned = re.sub(r'[^0-9a-fA-F]', '', mac)
+    if len(cleaned) != 12:
+        return None
+    return ':'.join(cleaned[i:i+2] for i in range(0, 12, 2)).lower()
 
 
 def get_local_ip():
@@ -78,100 +89,8 @@ def get_local_ip():
         s.close()
         return ip
     except Exception as e:
-        log_error(f"获取本机 IP 失败: {e}")
+        log(f"获取本机 IP 失败: {e}")
         return None
-
-
-def get_active_interface():
-    """获取当前活动网卡信息"""
-    local_ip = get_local_ip()
-    if not local_ip:
-        return None
-
-    try:
-        import psutil
-        addrs = psutil.net_if_addrs()
-        for name, addr_list in addrs.items():
-            has_ip = False
-            mac = None
-            for a in addr_list:
-                if a.family == socket.AF_INET and a.address == local_ip:
-                    has_ip = True
-                if a.family == psutil.AF_LINK and a.address:
-                    mac = a.address.replace("-", ":").lower()
-            if has_ip and mac:
-                is_wireless = any(
-                    kw in name.lower()
-                    for kw in ["wi-fi", "wlan", "wireless", "无线", "802.11"]
-                )
-                return {
-                    "name": name,
-                    "desc": name,
-                    "mac": mac,
-                    "wireless": is_wireless,
-                }
-    except ImportError:
-        pass
-    except Exception as e:
-        log_error(f"psutil 获取网卡信息失败: {e}")
-
-    try:
-        cmd = (
-            f"Get-NetIPAddress -IPAddress {local_ip} -ErrorAction SilentlyContinue | "
-            f"Get-NetAdapter | "
-            f"Select-Object Name,InterfaceDescription,MacAddress | ConvertTo-Json -Compress"
-        )
-        output = subprocess.check_output(
-            ["powershell", "-NoProfile", "-Command", cmd],
-            encoding="utf-8",
-            errors="ignore",
-            creationflags=CREATE_NO_WINDOW,
-        ).strip()
-
-        if output:
-            info = json.loads(output)
-            if isinstance(info, list):
-                info = info[0]
-            name = info.get("Name", "") or ""
-            desc = info.get("InterfaceDescription", "") or ""
-            mac = (info.get("MacAddress", "") or "").replace("-", ":").lower()
-            text = (name + " " + desc).lower()
-            is_wireless = any(
-                kw in text
-                for kw in ["wi-fi", "wlan", "wireless", "无线", "802.11"]
-            )
-            return {
-                "name": name,
-                "desc": desc,
-                "mac": mac,
-                "wireless": is_wireless,
-            }
-    except Exception as e:
-        log_error(f"PowerShell 获取网卡信息失败: {e}")
-
-    return None
-
-
-def choose_mac():
-    """根据当前活动网卡选择 MAC"""
-    info = get_active_interface()
-
-    if info:
-        actual = info["mac"]
-        eth = CONFIG["mac_ethernet"].lower()
-        wl = CONFIG["mac_wireless"].lower()
-
-        if actual == eth:
-            return CONFIG["mac_ethernet"]
-        if actual == wl:
-            return CONFIG["mac_wireless"]
-
-        if info["wireless"]:
-            return CONFIG["mac_wireless"]
-        else:
-            return CONFIG["mac_ethernet"]
-
-    return CONFIG["mac_ethernet"]
 
 
 def get_wifi_ssid():
@@ -214,13 +133,37 @@ def is_campus_network():
 
 
 def is_internet_ok():
-    """检测外网是否可达"""
+    """检测外网是否真正可达（避免被 Portal 重定向误判）"""
+    host = CONFIG["internet_check_host"]
+    if host.startswith("http://") or host.startswith("https://"):
+        url = host
+    else:
+        url = f"http://{host}"
+
     try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.settimeout(3)
-        s.connect((CONFIG["internet_check_host"], CONFIG["internet_check_port"]))
-        s.close()
-        return True
+        r = requests.get(url, timeout=5, allow_redirects=False)
+
+        if r.status_code == 204:
+            return True
+
+        if r.status_code == 200:
+            text = r.text.lower()
+            portal_keywords = [
+                "portal", "webauth", "认证", "登录", "校园网",
+                CONFIG["auth_host"].lower()
+            ]
+            if any(kw in text for kw in portal_keywords):
+                return False
+            return True
+
+        if 300 <= r.status_code < 400:
+            loc = r.headers.get("Location", "").lower()
+            if any(kw in loc for kw in ["portal", "webauth", "auth", CONFIG["auth_host"].lower()]):
+                return False
+            return True
+
+        return False
+
     except Exception:
         return False
 
@@ -235,13 +178,20 @@ def validate_config():
         errors.append("请填写校园网账号（user_id）")
     if CONFIG["passwd"] in ("", "你的密码"):
         errors.append("请填写校园网密码（passwd）")
-    if CONFIG["mac_ethernet"] in ("", "aa:bb:cc:dd:ee:01") and \
-       CONFIG["mac_wireless"] in ("", "aa:bb:cc:dd:ee:02"):
-        errors.append("请至少填写一个网卡 MAC")
+
+    mac_input = CONFIG.get("mac", "")
+    if mac_input in ("", "你的MAC地址"):
+        errors.append("请填写本机 MAC 地址（mac）")
+    else:
+        normalized = normalize_mac(mac_input)
+        if not normalized:
+            errors.append("MAC 地址格式错误，应为 12 位十六进制字符，可带 : 或 - 分隔")
+        else:
+            CONFIG["mac"] = normalized  # 自动标准化
 
     if errors:
         for e in errors:
-            log_error(f"配置错误: {e}")
+            log(f"配置错误: {e}")
         return False
     return True
 
@@ -287,21 +237,29 @@ def do_login(local_ip, mac):
             timeout=CONFIG["timeout"],
         )
         response.raise_for_status()
-    except requests.RequestException:
-        log_error("服务器未响应")
+    except requests.RequestException as e:
+        log(f"请求失败: {e}")
         return False
 
     try:
         result = response.json()
     except Exception:
-        log_error(f"返回不是 JSON: {response.text[:200]}")
+        log(f"返回不是 JSON: {response.text[:200]}")
         return False
 
     if result.get("success") is True and result.get("code") == 200:
+        redirect_url = result.get("result", {}).get("redirect")
+        if redirect_url:
+            full_url = f"http://{CONFIG['auth_host']}{redirect_url}"
+            try:
+                requests.get(full_url, timeout=5)
+            except Exception:
+                pass
+        log("登录成功")
         return True
     else:
         msg = result.get("message", "未知错误")
-        log_error(f"登录失败: {msg} | 完整返回: {result}")
+        log(f"登录失败: {msg} | 完整返回: {result}")
         return False
 
 
@@ -309,10 +267,10 @@ def try_login():
     """尝试登录一次（带重试）"""
     local_ip = get_local_ip()
     if not local_ip:
-        log_error("无法获取本机 IP")
+        log("无法获取本机 IP")
         return False
 
-    mac = choose_mac()
+    mac = CONFIG["mac"]
 
     for i in range(1, CONFIG["retry_times"] + 1):
         if do_login(local_ip, mac):
@@ -320,37 +278,43 @@ def try_login():
         if i < CONFIG["retry_times"]:
             time.sleep(CONFIG["retry_interval"])
 
-    log_error(f"多次尝试后仍登录失败 | IP: {local_ip} | MAC: {mac}")
+    log(f"多次尝试后仍登录失败 | IP: {local_ip} | MAC: {mac}")
     return False
 
 
 def main():
     """入口：启动时判断是否在校园网，不在则直接退出"""
+    # 删除上次运行的日志
+    if os.path.exists(LOG_PATH):
+        try:
+            os.remove(LOG_PATH)
+        except Exception:
+            pass
+
+    log("=" * 50)
+    log("脚本启动")
+
     if not validate_config():
         return
 
-    # 1. 启动时判断是否在校园网，不在则退出
     if not is_campus_network():
-        log_error("启动时不在校园网环境，退出")
+        log("启动时不在校园网环境，退出")
         return
 
-    # 2. 进入常驻循环
     while True:
         try:
-            # 每轮循环也检查是否还在校园网
             if not is_campus_network():
-                log_error("检测到已离开校园网，退出")
+                log("检测到已离开校园网，退出")
                 return
 
-            # 外网正常，什么都不做
             if is_internet_ok():
                 pass
             else:
-                # 断网，尝试重新登录
+                log("检测到断网，开始重新登录")
                 try_login()
 
         except Exception as e:
-            log_error(f"循环异常: {e}")
+            log(f"循环异常: {e}")
 
         time.sleep(CONFIG["check_interval"])
 
