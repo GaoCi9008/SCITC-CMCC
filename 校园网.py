@@ -25,7 +25,6 @@ CONFIG = {
     "wlanacname": "SCITC-BRAS-ME60",
 
     # 本机 MAC 地址（支持大小写，支持 : 或 - 分隔）
-    # 示例：b0:25:aa:7e:b4:ae 或 B0-25-AA-7E-B4-AE 或 b0-25:aa:7e:b4:ae
     "mac": "你的MAC",
 
     # 校园网 WiFi 名称（可选，留空则不校验）
