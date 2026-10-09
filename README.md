@@ -88,7 +88,7 @@ pip install requests
 | `user_id` | 校园网账号 | `你的账号` |
 | `passwd` | 校园网密码 | `你的密码` |
 | `wlanacname` | 认证服务器名称 | `SCITC-BRAS-ME60` |
-| `mac` | 本机 MAC 地址，支持大小写和 `:` / `-` 分隔，脚本会自动标准化 | `b0:25:aa:7e:b4:ae` |
+| `mac` | 本机 MAC 地址，支持大小写和 `:` / `-` 分隔，脚本会自动标准化 |
 | `campus_ssid` | 校园网 WiFi 名称，留空则不校验 | 可留空 |
 | `timeout` | 请求超时时间（秒） | `8` |
 | `retry_times` | 登录失败重试次数 | `3` |
